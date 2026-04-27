@@ -33,12 +33,21 @@ mkdir -p "${TARGET_DIR}"
 
 # Copy every .ts file from db-schema source. `client.ts` is skipped because
 # Local-ID uses its own postgres-js-based client factory (see src/db/client.ts).
+# `index.ts` gets its `export * from "./client.js"` line stripped on copy so
+# the bundled re-export doesn't break the build (the bundled client.ts is
+# intentionally absent; Local-ID's own client lives at src/db/client.ts).
 for file in "${SOURCE_DIR}"/*.ts; do
   basename="$(basename "${file}")"
   if [ "${basename}" = "client.ts" ]; then
     continue
   fi
-  cp "${file}" "${TARGET_DIR}/${basename}"
+  if [ "${basename}" = "index.ts" ]; then
+    # Strip any line re-exporting from a sibling client.js — that file is
+    # intentionally absent in Local-ID's bundled copy.
+    grep -v './client\.js' "${file}" > "${TARGET_DIR}/${basename}" || true
+  else
+    cp "${file}" "${TARGET_DIR}/${basename}"
+  fi
 done
 
 # Emit a header file so the source of each bundled file is discoverable.

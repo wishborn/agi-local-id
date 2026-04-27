@@ -58,6 +58,12 @@ export const pluginsMarketplace = pgTable(
     homepage: text("homepage"),
     provides: jsonb("provides"),
     depends: jsonb("depends"),
+    /** Previous names this plugin used. Catalog matcher resolves either
+     *  the primary name OR any alias (see MarketplacePluginEntry.aliases
+     *  + marketplace-manager dependency lookup). Persists Phase M's
+     *  aionima-* → agi-* rename mapping so older requires: arrays in
+     *  stack manifests keep resolving. */
+    aliases: jsonb("aliases"),
     trustTier: text("trust_tier"),
     integrityHash: text("integrity_hash"),
     signedBy: text("signed_by"),

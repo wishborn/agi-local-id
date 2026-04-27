@@ -25,6 +25,9 @@ export * from "./compliance.js";
 // Platform runtime state (magic apps, notifications, kv meta)
 export * from "./platform.js";
 
+// Cost ledger — per-turn agent-router cost + power records (s111 t421)
+export * from "./cost-ledger.js";
+
 // Marketplace catalog indexes + installed state
 export * from "./marketplaces.js";
 
@@ -33,3 +36,5 @@ export * from "./hf.js";
 
 // Security scan runs and findings
 export * from "./security.js";
+
+// Shared drizzle + pg client factory (used by services + test fixtures)
