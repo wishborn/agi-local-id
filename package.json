@@ -1,6 +1,6 @@
 {
   "name": "agi-local-id",
-  "version": "0.1.10",
+  "version": "0.1.11",
   "description": "Local identity service for Aionima AGI — credential management, entity identity, and federation peer",
   "type": "module",
   "main": "dist/index.js",

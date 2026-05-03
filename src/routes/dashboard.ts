@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { eq, and, like } from "drizzle-orm";
 import { Hono } from "hono";
 import type { AuthEnv } from "../auth/middleware.js";
 import type { NetworkIdentity } from "../auth/network-identity.js";
@@ -82,12 +82,39 @@ export function dashboardRoutes(db: DrizzleDb) {
       })
       .join("\n");
 
+    // Plaid items — separate section in the dashboard. Multi-bank support
+    // via role-encoding: rows have provider="plaid" and role="plaid-item:<id>".
+    const plaidRows = userConnections
+      .filter((c) => c.provider === "plaid" && c.role.startsWith("plaid-item:"))
+      .map((c) => {
+        const itemId = c.role.slice("plaid-item:".length);
+        return `
+          <tr>
+            <td>${escapeHtml(c.accountLabel ?? "Plaid Item")}</td>
+            <td style="font-family: monospace; font-size: 0.8rem; color: var(--text-muted);">${escapeHtml(itemId)}</td>
+            <td><span class="badge badge-connected">Connected</span></td>
+            <td>
+              <button class="btn btn-sm btn-danger" onclick="disconnectPlaidItem('${escapeHtml(itemId)}')">Disconnect</button>
+            </td>
+          </tr>`;
+      })
+      .join("\n");
+
+    const plaidEmpty = plaidRows.length === 0
+      ? `<tr><td colspan="4" style="text-align:center;color:var(--text-muted);font-size:0.9rem;padding:1.2rem;">No banks connected. Click "Connect Bank Account" to link one via Plaid.</td></tr>`
+      : "";
+
     const config = getConfig();
+    const plaidConfigured = !!(config.plaid.clientIdVaultRef && config.plaid.secretVaultRef);
+
     const dashboardHtml = await readView("dashboard.html");
     const content = dashboardHtml
       .replace("{{user_email}}", escapeHtml(user?.email ?? "Owner (local)"))
       .replace("{{service_rows}}", serviceRows)
-      .replace("{{hive_id_url}}", escapeHtml(config.hiveIdUrl));
+      .replace("{{hive_id_url}}", escapeHtml(config.hiveIdUrl))
+      .replace("{{plaid_rows}}", plaidRows + plaidEmpty)
+      .replace("{{plaid_env}}", escapeHtml(config.plaid.env))
+      .replace("{{plaid_configured}}", plaidConfigured ? "true" : "false");
 
     const layout = await readView("layout.html");
     const html = layout

@@ -22,6 +22,34 @@
   </table>
 </div>
 
+<div style="display: flex; justify-content: space-between; align-items: center; margin: 2rem 0 1rem 0;">
+  <h2 style="margin: 0;">Banks (Plaid)</h2>
+  <div style="display: flex; gap: 0.75rem; align-items: center;">
+    <span style="font-size: 0.8rem; color: var(--text-muted);">env: <span style="font-family: monospace;">{{plaid_env}}</span></span>
+    <button id="plaid-connect-btn" class="btn btn-sm btn-primary" onclick="openPlaidLink()">Connect Bank Account</button>
+  </div>
+</div>
+
+<div class="card">
+  <table>
+    <thead>
+      <tr>
+        <th>Institution</th>
+        <th>Item ID</th>
+        <th>Status</th>
+        <th>Action</th>
+      </tr>
+    </thead>
+    <tbody>
+      {{plaid_rows}}
+    </tbody>
+  </table>
+</div>
+
+<div id="plaid-config-warning" style="display: none; margin-top: 0.75rem; padding: 0.75rem 1rem; background: rgba(255, 200, 0, 0.08); border: 1px solid rgba(255, 200, 0, 0.3); border-radius: 6px; font-size: 0.85rem; color: var(--text-muted);">
+  Plaid is not configured. Set <span style="font-family: monospace; color: var(--text);">PLAID_CLIENT_ID_VAULT_REF</span> and <span style="font-family: monospace; color: var(--text);">PLAID_SECRET_VAULT_REF</span> env vars pointing to Vault entries on the agi gateway.
+</div>
+
 <!-- Device Flow Modal -->
 <div id="device-flow-modal" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.6);z-index:1000;">
   <div style="max-width:420px;margin:15vh auto;background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:2rem;">
@@ -57,8 +85,10 @@
   }
 </style>
 
+<script src="https://cdn.plaid.com/link/v2/stable/link-initialize.js"></script>
 <script>
   var HIVE_ID_URL = "{{hive_id_url}}";
+  var PLAID_CONFIGURED = ({{plaid_configured}} === true);
 
   function getCsrfToken() {
     var match = document.cookie.match(/(?:^|;\s*)aionima_csrf=([^;]*)/);
@@ -199,5 +229,95 @@
     // loop can honor GitHub's slow_down cadence).
     if (dfPoller) { clearTimeout(dfPoller); dfPoller = null; }
     document.getElementById("device-flow-modal").style.display = "none";
+  }
+
+  // ---------------------------------------------------------------------------
+  // Plaid Link
+  // ---------------------------------------------------------------------------
+
+  // Surface the configuration banner if Vault refs are missing.
+  if (!PLAID_CONFIGURED) {
+    var warn = document.getElementById("plaid-config-warning");
+    if (warn) warn.style.display = "block";
+    var btn = document.getElementById("plaid-connect-btn");
+    if (btn) {
+      btn.disabled = true;
+      btn.title = "Configure PLAID_*_VAULT_REF env vars first";
+    }
+  }
+
+  function openPlaidLink() {
+    if (!PLAID_CONFIGURED) {
+      alert("Plaid is not configured. See the banner below the table.");
+      return;
+    }
+    if (typeof Plaid === "undefined") {
+      alert("Plaid Link script failed to load. Check network connectivity to cdn.plaid.com.");
+      return;
+    }
+
+    fetch("/api/auth/plaid-link/create-link-token", {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { "Content-Type": "application/json", "X-CSRF-Token": getCsrfToken() },
+      body: JSON.stringify({})
+    })
+    .then(function(res) { return res.json().then(function(b) { return { ok: res.ok, body: b }; }); })
+    .then(function(r) {
+      if (!r.ok) {
+        alert("Failed to create Plaid link token: " + (r.body.error || "unknown error"));
+        return;
+      }
+      var handler = Plaid.create({
+        token: r.body.linkToken,
+        onSuccess: function(public_token, metadata) {
+          fetch("/api/auth/plaid-link/exchange-public-token", {
+            method: "POST",
+            credentials: "same-origin",
+            headers: { "Content-Type": "application/json", "X-CSRF-Token": getCsrfToken() },
+            body: JSON.stringify({
+              publicToken: public_token,
+              institutionName: metadata && metadata.institution ? metadata.institution.name : "Plaid Item",
+              institutionId: metadata && metadata.institution ? metadata.institution.institution_id : null
+            })
+          })
+          .then(function(res) { return res.json().then(function(b) { return { ok: res.ok, body: b }; }); })
+          .then(function(r2) {
+            if (!r2.ok) {
+              alert("Failed to exchange public token: " + (r2.body.error || "unknown error"));
+              return;
+            }
+            window.location.reload();
+          });
+        },
+        onExit: function(err, metadata) {
+          // Plaid Link closed. Nothing to do — user may have cancelled.
+          if (err) {
+            console.warn("Plaid Link exit with error:", err);
+          }
+        }
+      });
+      handler.open();
+    })
+    .catch(function(err) {
+      alert("Network error opening Plaid Link: " + err.message);
+    });
+  }
+
+  function disconnectPlaidItem(itemId) {
+    if (!confirm("Disconnect this bank account? Plaid will be notified to revoke access.")) return;
+    fetch("/api/auth/plaid-link/items/" + encodeURIComponent(itemId) + "/remove", {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { "X-CSRF-Token": getCsrfToken() }
+    })
+    .then(function(res) { return res.json().then(function(b) { return { ok: res.ok, body: b }; }); })
+    .then(function(r) {
+      if (!r.ok) {
+        alert("Failed to disconnect: " + (r.body.error || "unknown error"));
+        return;
+      }
+      window.location.reload();
+    });
   }
 </script>
