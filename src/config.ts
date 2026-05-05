@@ -21,23 +21,22 @@ export interface IdServiceConfig {
   /** Public Hive-ID URL — used for OAuth delegation in Phase 2 */
   hiveIdUrl: string;
   /**
-   * AGI gateway base URL on the private network. Used to resolve Vault
-   * entries (PLAID_CLIENT_ID + PLAID_SECRET) at runtime. Default
-   * `https://gateway.ai.on`; override via GATEWAY_URL env var when the
-   * gateway lives elsewhere.
+   * AGI gateway base URL on the private network. Default
+   * `https://gateway.ai.on`; override via GATEWAY_URL env var.
+   *
+   * As of s149 cycle 220 the GATEWAY_URL is no longer used for Plaid
+   * Vault lookups — Plaid creds live at Hive-ID under the cycle-215-
+   * unified architecture. Kept for other future agi-side services that
+   * Local-ID may need to reach.
    */
   gatewayUrl: string;
   /**
-   * Plaid integration. Vault entry IDs (owner-specific ULIDs) are read
-   * from env so nothing Plaid-related is hardcoded in source. Per
-   * `feedback_localid_private_be_careful_what_ships_in_agi`.
+   * Hive-ID base URL — public HTTPS service that hosts third-party API
+   * brokering (Plaid + Google + Discord per s149). Local-ID forwards
+   * proxy calls here with Bearer DToken auth. Default
+   * `https://id.aionima.ai`; override via HIVE_ID_URL env var.
    */
-  plaid: {
-    clientIdVaultRef: string | undefined;
-    secretVaultRef: string | undefined;
-    /** sandbox | development | production — Plaid's product tier (NOT agi hosting env). */
-    env: "sandbox" | "development" | "production";
-  };
+  hiveIdBaseUrl: string;
   /** Owner node connection — points back to the AGI gateway */
   ownerNode: {
     url: string | undefined;
@@ -78,23 +77,14 @@ export function loadConfig(): IdServiceConfig {
     throw new Error("ENCRYPTION_KEY must be a 64-character hex string (32 bytes)");
   }
 
-  const plaidEnvRaw = process.env.PLAID_ENV ?? "sandbox";
-  if (plaidEnvRaw !== "sandbox" && plaidEnvRaw !== "development" && plaidEnvRaw !== "production") {
-    throw new Error(`PLAID_ENV must be sandbox | development | production, got "${plaidEnvRaw}"`);
-  }
-
   _config = {
     baseUrl,
     port,
     databaseUrl,
     encryptionKey,
     hiveIdUrl: process.env.HIVE_ID_URL ?? "https://id.aionima.ai",
+    hiveIdBaseUrl: process.env.HIVE_ID_URL ?? "https://id.aionima.ai",
     gatewayUrl: process.env.GATEWAY_URL ?? "https://gateway.ai.on",
-    plaid: {
-      clientIdVaultRef: process.env.PLAID_CLIENT_ID_VAULT_REF,
-      secretVaultRef: process.env.PLAID_SECRET_VAULT_REF,
-      env: plaidEnvRaw,
-    },
     ownerNode: {
       url: process.env.OWNER_NODE_URL,
       apiKey: process.env.OWNER_NODE_API_KEY,

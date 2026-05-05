@@ -22,6 +22,7 @@ import { userRoutes } from "./routes/users.js";
 import { oauthDelegateRoutes } from "./routes/oauth-delegate.js";
 import { deviceFlowRoutes } from "./routes/device-flow.js";
 import { plaidLinkRoutes } from "./routes/plaid-link.js";
+import { proxyForwardRoutes } from "./routes/proxy-forward.js";
 import { federationIdentityRoutes, buildNodeManifest } from "./routes/federation/identity.js";
 import { csrfMiddleware } from "./security/csrf.js";
 import { rateLimit } from "./security/rate-limit.js";
@@ -142,6 +143,14 @@ app.route("/api/users", userRoutes(db, entityService));
 app.route("/api/oauth/delegate", oauthDelegateRoutes(db));
 app.route("/api/auth/device-flow", deviceFlowRoutes(db));
 app.route("/api/auth/plaid-link", plaidLinkRoutes(db));
+
+// s149 t626 — generic provider proxy forwarding to Hive-ID. Used by
+// agi plugins (t627) calling per-tool proxy routes:
+//   POST /api/proxy/plaid/accounts-get with role=plaid-item:<id>
+//   POST /api/proxy/google/calendar.events.list with role=owner
+// Local-ID looks up the encrypted DToken on connections + forwards to
+// Hive-ID's /api/proxy/<provider>/<endpoint> with Bearer auth.
+app.route("/api/proxy", proxyForwardRoutes(db));
 app.route("/dashboard", dashboardRoutes(db));
 app.route("/channels", channelRoutes(db));
 app.route("/api/channels", channelRoutes(db));

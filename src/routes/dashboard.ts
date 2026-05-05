@@ -105,7 +105,14 @@ export function dashboardRoutes(db: DrizzleDb) {
       : "";
 
     const config = getConfig();
-    const plaidConfigured = !!(config.plaid.clientIdVaultRef && config.plaid.secretVaultRef);
+    // Plaid creds + env now live at Hive-ID per s149 cycle 215
+    // architectural unification. Local-ID's dashboard treats Plaid as
+    // "always available if Hive-ID is configured" since we no longer
+    // hold Plaid-specific config locally. The Connect Bank Account flow
+    // forwards to Hive-ID; if Hive-ID's Plaid creds aren't configured,
+    // /create-link-token returns 503 — owner sees the error then.
+    const plaidConfigured = true;
+    const plaidEnv = "via Hive-ID";
 
     const dashboardHtml = await readView("dashboard.html");
     const content = dashboardHtml
@@ -113,7 +120,7 @@ export function dashboardRoutes(db: DrizzleDb) {
       .replace("{{service_rows}}", serviceRows)
       .replace("{{hive_id_url}}", escapeHtml(config.hiveIdUrl))
       .replace("{{plaid_rows}}", plaidRows + plaidEmpty)
-      .replace("{{plaid_env}}", escapeHtml(config.plaid.env))
+      .replace("{{plaid_env}}", escapeHtml(plaidEnv))
       .replace("{{plaid_configured}}", plaidConfigured ? "true" : "false");
 
     const layout = await readView("layout.html");
