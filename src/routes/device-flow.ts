@@ -22,6 +22,7 @@
 import { randomBytes } from "node:crypto";
 import { eq, and } from "drizzle-orm";
 import { Hono } from "hono";
+import { nanoid } from "nanoid";
 import type { AuthEnv } from "../auth/middleware.js";
 import type { NetworkIdentity } from "../auth/network-identity.js";
 import type { DrizzleDb } from "../db/client.js";
@@ -220,11 +221,23 @@ export function deviceFlowRoutes(db: DrizzleDb) {
           reason: "hive_id_required",
         }, 503);
       }
-      // TODO: delegate device flow to Hive-ID when it supports it
+      // Google + Discord use authorization-code flow (not RFC 8628 device-flow).
+      // Redirect the dashboard to Hive-ID's OAuth start; Hive-ID will call back
+      // to /api/auth/device-flow/hive-callback with a DToken after the user
+      // authorizes. LOCAL_ID_URL must be set to a URL Hive-ID can reach
+      // (same LAN or ngrok tunnel during dev).
+      const localIdUrl = process.env.LOCAL_ID_URL ?? "https://id.ai.on";
+      const callbackUrl = `${localIdUrl}/api/auth/device-flow/hive-callback`;
+      const authUrl =
+        `${hiveUrl}/oauth/${provider}/start?` +
+        new URLSearchParams({ localCallback: callbackUrl, role }).toString();
+
       return c.json({
-        error: `${provider} device flow via Hive-ID is not yet implemented. Hive-ID will broker this in a future release.`,
-        reason: "not_implemented",
-      }, 501);
+        authType: "hive_redirect",
+        authUrl,
+        provider,
+        role,
+      }, 200);
     }
 
     const clientId = provider === "github" ? GITHUB_CLIENT_ID : "";
@@ -574,11 +587,84 @@ export function deviceFlowRoutes(db: DrizzleDb) {
         reason: "hive_id_required",
       }, 503);
     }
-    // TODO: delegate refresh to Hive-ID when it supports it
+    // Token refresh for proxied providers (Google) is handled transparently
+    // by Hive-ID's proxy gateway at call time — the expired access_token is
+    // renewed against Google's token endpoint and the connections row is
+    // updated before the original API call is retried. No explicit Local-ID
+    // refresh call is needed when using the /api/proxy/google/* path.
     return c.json({
-      error: "Token refresh via Hive-ID is not yet implemented.",
-      reason: "not_implemented",
-    }, 501);
+      ok: true,
+      message: "Google token refresh is handled transparently by Hive-ID at proxy call time.",
+      reason: "transparent_via_hive_proxy",
+    }, 200);
+  });
+
+  /**
+   * GET /hive-callback
+   *
+   * Hive-ID redirects here after a successful Google or Discord
+   * authorization-code OAuth dance. Receives the DToken Hive-ID minted,
+   * stores it encrypted in Local-ID's connections table, then returns
+   * an HTML page that closes the OAuth popup window.
+   *
+   * Expected query params from Hive-ID:
+   *   ?dtoken=dtok_...&provider=google|discord&role=owner&accountLabel=user@example.com
+   */
+  app.get("/hive-callback", async (c) => {
+    const provider = c.req.query("provider") as ProviderName | undefined;
+    const role = c.req.query("role") ?? "owner";
+    const dtoken = c.req.query("dtoken");
+    const accountLabel = c.req.query("accountLabel") ?? "";
+
+    if (!provider || !dtoken || !HIVE_BROKERED_PROVIDERS.has(provider)) {
+      return c.json(
+        { error: "Missing provider or dtoken, or unsupported provider" },
+        400,
+      );
+    }
+
+    const userId = await resolveOrCreateLocalOwner(db, accountLabel);
+
+    const [existing] = await db
+      .select({ id: connections.id })
+      .from(connections)
+      .where(
+        and(
+          eq(connections.userId, userId),
+          eq(connections.provider, provider),
+          eq(connections.role, role),
+        ),
+      )
+      .limit(1);
+
+    if (existing) {
+      await db
+        .update(connections)
+        .set({ dtoken: encrypt(dtoken), accountLabel, updatedAt: new Date() })
+        .where(eq(connections.id, existing.id));
+    } else {
+      await db.insert(connections).values({
+        id: nanoid(),
+        userId,
+        provider,
+        role,
+        accountLabel,
+        dtoken: encrypt(dtoken),
+        accessToken: null,
+        refreshToken: null,
+        tokenExpiresAt: null,
+        scopes: null,
+      });
+    }
+
+    // Return a minimal page — the dashboard opened Hive-ID's OAuth start in
+    // a popup; this response lands in that popup and closes it.
+    return c.html(
+      `<!DOCTYPE html><html><head><title>Connected</title></head><body>` +
+        `<script>window.opener?.postMessage({type:"aionima:oauth-complete",provider:"${provider}",role:"${role}"},"*");window.close();</script>` +
+        `<p>${provider} connected. You may close this window.</p>` +
+        `</body></html>`,
+    );
   });
 
   return app;
